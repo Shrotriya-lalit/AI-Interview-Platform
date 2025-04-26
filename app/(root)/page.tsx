@@ -1,3 +1,5 @@
+// app/(root)/page.tsx
+
 import Link from "next/link";
 import Image from "next/image";
 
@@ -8,18 +10,33 @@ import { getCurrentUser } from "@/lib/actions/auth.action";
 import {
   getInterviewsByUserId,
   getLatestInterviews,
+  getFeedbackByInterviewId,
 } from "@/lib/actions/general.action";
 
 async function Home() {
   const user = await getCurrentUser();
+  const userId = user?.id!;
 
-  const [userInterviews, allInterview] = await Promise.all([
-    getInterviewsByUserId(user?.id!),
-    getLatestInterviews({ userId: user?.id! }),
+  // 1. Fetch your interviews + all latest interviews
+  const [userInterviews, allInterviews] = await Promise.all([
+    getInterviewsByUserId(userId),
+    getLatestInterviews({ userId }),
   ]);
 
-  const hasPastInterviews = userInterviews?.length! > 0;
-  const hasUpcomingInterviews = allInterview?.length! > 0;
+  const allInterviewList = [...(userInterviews ?? []), ...(allInterviews ?? [])];
+
+  // 2. For all interviews, check if feedback exists
+  const feedbackList = await Promise.all(
+    allInterviewList.map((interview) =>
+      getFeedbackByInterviewId({ interviewId: interview.id, userId })
+    )
+  );
+
+  const attemptedInterviews = allInterviewList.filter((_, idx) => feedbackList[idx]);
+  const notAttemptedInterviews = allInterviewList.filter((_, idx) => !feedbackList[idx]);
+
+  const hasPastInterviews = attemptedInterviews.length > 0;
+  const hasUpcomingInterviews = notAttemptedInterviews.length > 0;
 
   return (
     <>
@@ -49,10 +66,10 @@ async function Home() {
 
         <div className="interviews-section">
           {hasPastInterviews ? (
-            userInterviews?.map((interview) => (
+            attemptedInterviews.map((interview) => (
               <InterviewCard
                 key={interview.id}
-                userId={user?.id}
+                userId={userId}
                 interviewId={interview.id}
                 role={interview.role}
                 type={interview.type}
@@ -71,10 +88,10 @@ async function Home() {
 
         <div className="interviews-section">
           {hasUpcomingInterviews ? (
-            allInterview?.map((interview) => (
+            notAttemptedInterviews.map((interview) => (
               <InterviewCard
                 key={interview.id}
-                userId={user?.id}
+                userId={userId}
                 interviewId={interview.id}
                 role={interview.role}
                 type={interview.type}

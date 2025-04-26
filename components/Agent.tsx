@@ -49,7 +49,7 @@ const Agent = ({
 
   const faceMeshRef = useRef<any>(null);
   const lastCheckRef = useRef<number>(0);
-
+  
   // Inject FaceMesh script
   useEffect(() => {
     if (typeof window === "undefined") return;

@@ -1,9 +1,13 @@
+// app/(root)/layout.tsx
+
 import Link from "next/link";
 import Image from "next/image";
 import { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import { isAuthenticated } from "@/lib/actions/auth.action";
+// 1. Import your new SignOutButton
+import SignOutButton from "@/components/SignOutButton";
 
 const Layout = async ({ children }: { children: ReactNode }) => {
   const isUserAuthenticated = await isAuthenticated();
@@ -11,14 +15,18 @@ const Layout = async ({ children }: { children: ReactNode }) => {
 
   return (
     <div className="root-layout">
-      <nav>
+      {/* 2. Flex nav: logo on left, Sign Out on right */}
+      <nav className="flex items-center justify-between px-6 py-4 bg-transparent">
         <Link href="/" className="flex items-center gap-2">
           <Image src="/logo.svg" alt="MockMate Logo" width={38} height={32} />
           <h2 className="text-primary-100">Intellecto</h2>
         </Link>
+
+        {/* 3. Sign Out trigger */}
+        <SignOutButton />
       </nav>
 
-      {children}
+      <main>{children}</main>
     </div>
   );
 };
