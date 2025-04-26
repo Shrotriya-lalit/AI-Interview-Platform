@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
@@ -30,40 +30,59 @@ const Agent = ({
   questions,
 }: AgentProps) => {
   const router = useRouter();
+
+  // call & transcript state
   const [callStatus, setCallStatus] = useState<CallStatus>(CallStatus.INACTIVE);
   const [messages, setMessages] = useState<SavedMessage[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [lastMessage, setLastMessage] = useState<string>("");
+  const [lastMessage, setLastMessage] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
+  // refs for video + streams
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
+  // refs for MediaPipe
+  const faceMeshRef = useRef<any>(null);
+  const cameraRef = useRef<any>(null);
+  const lastCheckRef = useRef<number>(0);
+
+  // 1️⃣ Inject MediaPipe scripts on client only
   useEffect(() => {
-    const onCallStart = () => {
-      setCallStatus(CallStatus.ACTIVE);
-    };
+    if (typeof window === "undefined") return;
+    const libs = [
+      {
+        id: "mp-face-mesh",
+        src: "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js",
+      },
+      {
+        id: "mp-camera-utils",
+        src: "https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js",
+      },
+    ];
+    libs.forEach(({ id, src }) => {
+      if (!document.getElementById(id)) {
+        const s = document.createElement("script");
+        s.id = id;
+        s.src = src;
+        s.async = true;
+        document.head.appendChild(s);
+      }
+    });
+  }, []);
 
-    const onCallEnd = () => {
-      setCallStatus(CallStatus.FINISHED);
-    };
-
-    const onMessage = (message: Message) => {
-      if (message.type === "transcript" && message.transcriptType === "final") {
-        const newMessage = { role: message.role, content: message.transcript };
-        setMessages((prev) => [...prev, newMessage]);
+  // 2️⃣ Wire up VAPI events
+  useEffect(() => {
+    const onCallStart = () => setCallStatus(CallStatus.ACTIVE);
+    const onCallEnd = () => setCallStatus(CallStatus.FINISHED);
+    const onMessage = (m: Message) => {
+      if (m.type === "transcript" && m.transcriptType === "final") {
+        setMessages((prev) => [...prev, { role: m.role, content: m.transcript }]);
       }
     };
-
-    const onSpeechStart = () => {
-      console.log("speech start");
-      setIsSpeaking(true);
-    };
-
-    const onSpeechEnd = () => {
-      console.log("speech end");
-      setIsSpeaking(false);
-    };
-
-    const onError = (error: Error) => {
-      console.log("Error:", error);
-    };
+    const onSpeechStart = () => setIsSpeaking(true);
+    const onSpeechEnd = () => setIsSpeaking(false);
+    const onError = (e: Error) => console.error("VAPI error:", e);
 
     vapi.on("call-start", onCallStart);
     vapi.on("call-end", onCallEnd);
@@ -82,64 +101,161 @@ const Agent = ({
     };
   }, []);
 
-  useEffect(() => {
-    if (messages.length > 0) {
-      setLastMessage(messages[messages.length - 1].content);
+  // 3️⃣ Anti-cheat frame handler (runs at most once/sec)
+  const handleFaceResults = (results: any) => {
+    const now = performance.now();
+    if (now - lastCheckRef.current < 1000) return;
+    lastCheckRef.current = now;
+
+    const newWarnings: string[] = [];
+    const faces = results.multiFaceLandmarks || [];
+
+    // ▪️ Face count
+    if (faces.length === 0) {
+      newWarnings.push("No face detected");
+    } else if (faces.length > 1) {
+      newWarnings.push("Multiple faces detected");
+    } else {
+      const lm = faces[0];
+      // ▪️ Head turn: eye midpoint X drift
+      const leftEye = lm[33], rightEye = lm[263];
+      const eyeMidX = (leftEye.x + rightEye.x) / 2;
+      if (Math.abs(eyeMidX - 0.5) > 0.12) {
+        newWarnings.push("Head turned away");
+      }
+      // ▪️ Eye gaze: iris vs eye corner
+      const leftIris = lm[468], rightIris = lm[473];
+      if (
+        Math.abs(leftIris.x - leftEye.x) > 0.04 ||
+        Math.abs(rightIris.x - rightEye.x) > 0.04
+      ) {
+        newWarnings.push("Eyes looking off-screen");
+      }
+      // ▪️ Posture/distance: face height ratio
+      let minY = 1, maxY = 0;
+      lm.forEach((pt) => {
+        if (pt.y < minY) minY = pt.y;
+        if (pt.y > maxY) maxY = pt.y;
+      });
+      if (maxY - minY < 0.18) {
+        newWarnings.push("Too far / slouching");
+      }
     }
 
-    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("handleGenerateFeedback");
+    setWarnings(newWarnings);
+  };
 
-      const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId!,
-        userId: userId!,
-        transcript: messages,
-        feedbackId,
-      });
+  // 4️⃣ Cleanup and feedback on call end
+  useEffect(() => {
+    if (callStatus !== CallStatus.FINISHED) return;
 
-      if (success && id) {
-        router.push(`/interview/${interviewId}/feedback`);
-      } else {
-        console.log("Error saving feedback");
-        router.push("/");
-      }
-    };
+    // stop MediaPipe
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+      cameraRef.current = null;
+    }
+    if (faceMeshRef.current) {
+      faceMeshRef.current.close();
+      faceMeshRef.current = null;
+    }
+    // stop webcam
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
 
-    if (callStatus === CallStatus.FINISHED) {
+    // generate or route feedback
+    const finalize = async () => {
       if (type === "generate") {
         router.push("/");
       } else {
-        handleGenerateFeedback(messages);
+        const { success, feedbackId: id } = await createFeedback({
+          interviewId: interviewId!,
+          userId: userId!,
+          transcript: messages,
+          feedbackId,
+        });
+        if (success && id) {
+          router.push(`/interview/${interviewId}/feedback`);
+        } else {
+          router.push("/");
+        }
       }
-    }
-  }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
+    };
+    finalize();
+  }, [callStatus]);
 
+  // 5️⃣ Start call + camera + anti-cheat
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
-    if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
-        variableValues: {
-          username: userName,
-          userid: userId,
-        },
+    try {
+      // start webcam
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: true,
       });
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
+      localStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
 
-      await vapi.start(interviewer, {
-        variableValues: {
-          questions: formattedQuestions,
+      // wait for MediaPipe scripts to load
+      await new Promise<void>((resolve) => {
+        const id = window.setInterval(() => {
+          if ((window as any).FaceMesh && (window as any).Camera) {
+            window.clearInterval(id);
+            resolve();
+          }
+        }, 50);
+      });
+
+      // access from globals
+      const MPFaceMesh = (window as any).FaceMesh;
+      const MPCamera = (window as any).Camera;
+
+      // instantiate FaceMesh
+      const fm = new MPFaceMesh({
+        locateFile: (f: string) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`,
+      });
+      fm.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      fm.onResults(handleFaceResults);
+      faceMeshRef.current = fm;
+
+      // hook Camera util
+      cameraRef.current = new MPCamera(videoRef.current!, {
+        onFrame: async () => {
+          await fm.send({ image: videoRef.current! });
         },
+        width: 640,
+        height: 480,
+      });
+      cameraRef.current.start();
+    } catch (e) {
+      console.warn("Camera/AntiCheat setup failed:", e);
+    }
+
+    // finally, start the VAPI call
+    if (type === "generate") {
+      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+        variableValues: { username: userName, userid: userId },
+      });
+    } else {
+      const formatted = questions?.map((q) => `- ${q}`).join("\n") ?? "";
+      await vapi.start(interviewer, {
+        variableValues: { questions: formatted },
       });
     }
   };
 
+  // 6️⃣ End call on button
   const handleDisconnect = () => {
     setCallStatus(CallStatus.FINISHED);
     vapi.stop();
@@ -147,39 +263,53 @@ const Agent = ({
 
   return (
     <>
-      <div className="call-view">
-        {/* AI Interviewer Card */}
+      {/* Warnings Panel */}
+      {warnings.length > 0 && (
+        <div className="mb-2 p-2 bg-yellow-100 border-l-4 border-yellow-500">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-yellow-800 text-sm">
+              ⚠️ {w}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Interview UI */}
+      <div className="call-view flex space-x-6">
+        {/* AI Interviewer */}
         <div className="card-interviewer">
-          <div className="avatar">
+          <div className="avatar relative">
             <Image
               src="/ai-avatar.png"
-              alt="profile-image"
+              alt="AI"
               width={65}
               height={54}
               className="object-cover"
             />
-            {isSpeaking && <span className="animate-speak" />}
+            {isSpeaking && (
+              <span className="animate-ping absolute inset-0 rounded-full bg-green-400 opacity-50" />
+            )}
           </div>
           <h3>AI Interviewer</h3>
         </div>
 
-        {/* User Profile Card */}
+        {/* User + Live Camera */}
         <div className="card-border">
-          <div className="card-content">
-            <Image
-              src="/user-avatar.png"
-              alt="profile-image"
-              width={539}
-              height={539}
-              className="rounded-full object-cover size-[120px]"
+          <div className="card-content flex flex-col items-center space-y-2">
+            <video
+              ref={videoRef}
+              className="rounded-lg w-64 h-48 bg-black"
+              muted
+              playsInline
             />
             <h3>{userName}</h3>
           </div>
         </div>
       </div>
 
+      {/* Transcript */}
       {messages.length > 0 && (
-        <div className="transcript-border">
+        <div className="transcript-border mt-4">
           <div className="transcript">
             <p
               key={lastMessage}
@@ -194,24 +324,25 @@ const Agent = ({
         </div>
       )}
 
-      <div className="w-full flex justify-center">
-        {callStatus !== "ACTIVE" ? (
-          <button className="relative btn-call" onClick={() => handleCall()}>
+      {/* Controls */}
+      <div className="flex justify-center mt-6">
+        {callStatus !== CallStatus.ACTIVE ? (
+          <button className="btn-call relative" onClick={handleCall}>
             <span
               className={cn(
                 "absolute animate-ping rounded-full opacity-75",
-                callStatus !== "CONNECTING" && "hidden"
+                callStatus !== CallStatus.CONNECTING && "hidden"
               )}
             />
-
             <span className="relative">
-              {callStatus === "INACTIVE" || callStatus === "FINISHED"
+              {callStatus === CallStatus.INACTIVE ||
+              callStatus === CallStatus.FINISHED
                 ? "Call"
-                : ". . ."}
+                : "..."}
             </span>
           </button>
         ) : (
-          <button className="btn-disconnect" onClick={() => handleDisconnect()}>
+          <button className="btn-disconnect" onClick={handleDisconnect}>
             End
           </button>
         )}
