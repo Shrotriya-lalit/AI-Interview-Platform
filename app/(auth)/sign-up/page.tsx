@@ -1,7 +1,13 @@
-import AuthForm from "@/components/AuthForm";
+// app/(auth)/sign-up/page.tsx
+'use client';
 
-const Page = () => {
-  return <AuthForm type="sign-up" />;
-};
+import React from 'react';
+import AuthForm from '@/components/AuthForm';
 
-export default Page;
+export default function SignUpPage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <AuthForm type="sign-up" />
+    </div>
+  );
+}

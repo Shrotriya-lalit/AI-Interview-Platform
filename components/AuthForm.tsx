@@ -28,24 +28,26 @@ const authFormSchema = (type: FormType) =>
 
 export default function AuthForm({ type }: { type: FormType }) {
   const router = useRouter();
-  const form = useForm<z.infer<typeof authFormSchema>>( {
-    resolver: zodResolver(authFormSchema(type)),
+  const formSchema = authFormSchema(type);
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
     defaultValues: { name: '', email: '', password: '' },
   });
 
-  const onSubmit = async (data: z.infer<typeof authFormSchema>) => {
+  const onSubmit = async (data: z.infer<typeof formSchema>) => {
     try {
       if (type === 'sign-up') {
+        // ───── SIGN-UP FLOW ─────
         const { name, email, password } = data;
 
-        // 1️⃣ Create in Firebase Auth
+        // 1️⃣ Create Firebase user
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           email,
           password
         );
 
-        // 2️⃣ Save to your DB
+        // 2️⃣ Persist to your backend
         const result = await signUp({
           uid: userCredential.user.uid,
           name: name!,
@@ -58,31 +60,31 @@ export default function AuthForm({ type }: { type: FormType }) {
           return;
         }
 
-        // 3️⃣ Success!  
-        console.log('[AuthForm] signup succeeded — redirecting…');
-        const target = process.env.NEXT_PUBLIC_RESUME_APP_URL!;
-        
-        // Try router.replace first (supports full URLs), then fallback
-        try {
-          router.replace(target);
-        } catch {
+        // 3️⃣ On success, hard-redirect to resume app
+        console.log('[AuthForm] signup succeeded, redirecting…');
+        const target =
+          process.env.NEXT_PUBLIC_RESUME_APP_URL ||
+          'http://35.207.218.80/resume_app/';
+        if (typeof window !== 'undefined') {
           window.location.assign(target);
         }
         return;
       }
 
-      // ——— sign-in branch unchanged ———
+      // ───── SIGN-IN FLOW ─────
       const { email, password } = data;
       const userCredential = await signInWithEmailAndPassword(
         auth,
         email,
         password
       );
+
       const idToken = await userCredential.user.getIdToken();
       if (!idToken) {
         toast.error('Sign in failed. Please try again.');
         return;
       }
+
       await signIn({ email, idToken });
       toast.success('Signed in successfully.');
       router.push('/');
@@ -97,16 +99,62 @@ export default function AuthForm({ type }: { type: FormType }) {
   return (
     <div className="card-border lg:min-w-[566px]">
       <div className="flex flex-col gap-6 card py-14 px-10">
-        {/* … rest of your JSX unchanged … */}
+        <div className="flex flex-row gap-2 justify-center">
+          <Image src="/logo.svg" alt="logo" height={32} width={38} />
+          <h2 className="text-primary-100">Intellecto</h2>
+        </div>
+
+        <h3>
+          Your AI-powered interview buddy that preps, grills, and levels you
+          up—before the real deal.
+        </h3>
+
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="w-full space-y-6 mt-4 form">
-            {/* name/email/password fields */}
-            <Button type="submit" className="btn">
+          <form
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="w-full space-y-6 mt-4 form"
+          >
+            {!isSignIn && (
+              <FormField
+                control={form.control}
+                name="name"
+                label="Name"
+                placeholder="Your Name"
+                type="text"
+              />
+            )}
+
+            <FormField
+              control={form.control}
+              name="email"
+              label="Email"
+              placeholder="Your email address"
+              type="email"
+            />
+
+            <FormField
+              control={form.control}
+              name="password"
+              label="Password"
+              placeholder="Enter your password"
+              type="password"
+            />
+
+            <Button className="btn" type="submit">
               {isSignIn ? 'Sign In' : 'Create an Account'}
             </Button>
           </form>
         </Form>
-        {/* switch link */}
+
+        <p className="text-center">
+          {isSignIn ? 'No account yet?' : 'Have an account already?'}{' '}
+          <Link
+            href={isSignIn ? '/sign-up' : '/sign-in'}
+            className="font-bold text-user-primary ml-1"
+          >
+            {isSignIn ? 'Sign Up' : 'Sign In'}
+          </Link>
+        </p>
       </div>
     </div>
   );
