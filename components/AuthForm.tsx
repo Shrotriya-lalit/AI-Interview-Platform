@@ -1,37 +1,37 @@
-"use client";
+'use client'
 
-import { z } from "zod";
-import Link from "next/link";
-import Image from "next/image";
-import { toast } from "sonner";
-import { auth } from "@/firebase/client";
-import { useForm } from "react-hook-form";
-import { useRouter } from "next/navigation";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod"
+import Link from "next/link"
+import Image from "next/image"
+import { toast } from "sonner"
+import { auth } from "@/firebase/client"
+import { useForm } from "react-hook-form"
+import { useRouter } from "next/navigation"
+import { zodResolver } from "@hookform/resolvers/zod"
 
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-} from "firebase/auth";
+} from "firebase/auth"
 
-import { Form } from "@/components/ui/form";
-import { Button } from "@/components/ui/button";
+import { Form } from "@/components/ui/form"
+import { Button } from "@/components/ui/button"
 
-import { signIn, signUp } from "@/lib/actions/auth.action";
-import FormField from "./FormField";
+import { signIn, signUp } from "@/lib/actions/auth.action"
+import FormField from "./FormField"
 
 const authFormSchema = (type: FormType) => {
   return z.object({
     name: type === "sign-up" ? z.string().min(3) : z.string().optional(),
     email: z.string().email(),
     password: z.string().min(3),
-  });
-};
+  })
+}
 
 const AuthForm = ({ type }: { type: FormType }) => {
-  const router = useRouter();
+  const router = useRouter()
 
-  const formSchema = authFormSchema(type);
+  const formSchema = authFormSchema(type)
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -39,63 +39,67 @@ const AuthForm = ({ type }: { type: FormType }) => {
       email: "",
       password: "",
     },
-  });
+  })
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     try {
       if (type === "sign-up") {
-        const { name, email, password } = data;
+        const { name, email, password } = data
 
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           email,
           password
-        );
+        )
 
         const result = await signUp({
           uid: userCredential.user.uid,
           name: name!,
           email,
           password,
-        });
+        })
 
         if (!result.success) {
-          toast.error(result.message);
-          return;
+          toast.error(result.message)
+          return
         }
 
-        toast.success("Account created successfully. Please sign in.");
-        router.push("/sign-in");
+        // Redirect to external resume app on successful sign-up
+        if (typeof window !== 'undefined') {
+          window.location.href = 'http://35.207.218.80/resume_app/'
+        }
+
+        return
       } else {
-        const { email, password } = data;
+        const { email, password } = data
 
         const userCredential = await signInWithEmailAndPassword(
           auth,
           email,
           password
-        );
+        )
 
-        const idToken = await userCredential.user.getIdToken();
+        const idToken = await userCredential.user.getIdToken()
         if (!idToken) {
-          toast.error("Sign in Failed. Please try again.");
-          return;
+          toast.error("Sign in Failed. Please try again.")
+          return
         }
 
         await signIn({
           email,
           idToken,
-        });
+        })
 
-        toast.success("Signed in successfully.");
-        router.push("/");
+        toast.success("Signed in successfully.")
+        router.push("/")
       }
-    } catch (error) {
-      console.log(error);
-      toast.error(`There was an error: ${error}`);
+    } catch (error: any) {
+      console.log(error)
+      toast.error(`There was an error: ${error}`)
     }
-  };
+  }
 
-  const isSignIn = type === "sign-in";
+  const isSignIn = type === "sign-in"
 
   return (
     <div className="card-border lg:min-w-[566px]">
@@ -155,7 +159,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
         </p>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default AuthForm;
+export default AuthForm
