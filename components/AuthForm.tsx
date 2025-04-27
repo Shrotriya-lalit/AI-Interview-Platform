@@ -1,105 +1,103 @@
-'use client'
+'use client';
 
-import { z } from "zod"
-import Link from "next/link"
-import Image from "next/image"
-import { toast } from "sonner"
-import { auth } from "@/firebase/client"
-import { useForm } from "react-hook-form"
-import { useRouter } from "next/navigation"
-import { zodResolver } from "@hookform/resolvers/zod"
+import { z } from 'zod';
+import Link from 'next/link';
+import Image from 'next/image';
+import { toast } from 'sonner';
+import { auth } from '@/firebase/client';
+import { useForm } from 'react-hook-form';
+import { useRouter } from 'next/navigation';
+import { zodResolver } from '@hookform/resolvers/zod';
 
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-} from "firebase/auth"
+} from 'firebase/auth';
 
-import { Form } from "@/components/ui/form"
-import { Button } from "@/components/ui/button"
+import { Form } from '@/components/ui/form';
+import { Button } from '@/components/ui/button';
 
-import { signIn, signUp } from "@/lib/actions/auth.action"
-import FormField from "./FormField"
+import { signIn, signUp } from '@/lib/actions/auth.action';
+import FormField from './FormField';
+
+type FormType = 'sign-in' | 'sign-up';
 
 const authFormSchema = (type: FormType) => {
   return z.object({
-    name: type === "sign-up" ? z.string().min(3) : z.string().optional(),
+    name: type === 'sign-up' ? z.string().min(3) : z.string().optional(),
     email: z.string().email(),
     password: z.string().min(3),
-  })
-}
+  });
+};
 
 const AuthForm = ({ type }: { type: FormType }) => {
-  const router = useRouter()
+  const router = useRouter();
 
-  const formSchema = authFormSchema(type)
+  const formSchema = authFormSchema(type);
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: "",
-      email: "",
-      password: "",
+      name: '',
+      email: '',
+      password: '',
     },
-  })
+  });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     try {
-      if (type === "sign-up") {
-        const { name, email, password } = data
+      if (type === 'sign-up') {
+        const { name, email, password } = data;
 
+        // Firebase create
         const userCredential = await createUserWithEmailAndPassword(
           auth,
           email,
           password
-        )
+        );
 
+        // Your backend signUp
         const result = await signUp({
           uid: userCredential.user.uid,
           name: name!,
           email,
           password,
-        })
+        });
 
         if (!result.success) {
-          toast.error(result.message)
-          return
+          toast.error(result.message);
+          return;
         }
 
-        // Redirect to external resume app on successful sign-up
+        // ←        —  ON SUCCESS, REDIRECT OUT
         if (typeof window !== 'undefined') {
-          window.location.href = 'http://35.207.218.80/resume_app/'
+          window.location.href = 'http://35.207.218.80/resume_app/';
         }
-
-        return
-      } else {
-        const { email, password } = data
-
-        const userCredential = await signInWithEmailAndPassword(
-          auth,
-          email,
-          password
-        )
-
-        const idToken = await userCredential.user.getIdToken()
-        if (!idToken) {
-          toast.error("Sign in Failed. Please try again.")
-          return
-        }
-
-        await signIn({
-          email,
-          idToken,
-        })
-
-        toast.success("Signed in successfully.")
-        router.push("/")
+        return;
       }
-    } catch (error: any) {
-      console.log(error)
-      toast.error(`There was an error: ${error}`)
-    }
-  }
 
-  const isSignIn = type === "sign-in"
+      // ──────────────────────────────────────────────────
+      // Sign-in branch stays the same:
+      const { email, password } = data;
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+      const idToken = await userCredential.user.getIdToken();
+      if (!idToken) {
+        toast.error('Sign in failed. Please try again.');
+        return;
+      }
+      await signIn({ email, idToken });
+      toast.success('Signed in successfully.');
+      router.push('/');
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`There was an error: ${error.message || error}`);
+    }
+  };
+
+  const isSignIn = type === 'sign-in';
 
   return (
     <div className="card-border lg:min-w-[566px]">
@@ -109,7 +107,10 @@ const AuthForm = ({ type }: { type: FormType }) => {
           <h2 className="text-primary-100">Intellecto</h2>
         </div>
 
-        <h3>Your AI-powered interview buddy that preps, grills, and levels you up—before the real deal.</h3>
+        <h3>
+          Your AI-powered interview buddy that preps, grills, and levels you
+          up—before the real deal.
+        </h3>
 
         <Form {...form}>
           <form
@@ -143,23 +144,23 @@ const AuthForm = ({ type }: { type: FormType }) => {
             />
 
             <Button className="btn" type="submit">
-              {isSignIn ? "Sign In" : "Create an Account"}
+              {isSignIn ? 'Sign In' : 'Create an Account'}
             </Button>
           </form>
         </Form>
 
         <p className="text-center">
-          {isSignIn ? "No account yet?" : "Have an account already?"}
+          {isSignIn ? 'No account yet?' : 'Have an account already?'}
           <Link
-            href={!isSignIn ? "/sign-in" : "/sign-up"}
+            href={!isSignIn ? '/sign-in' : '/sign-up'}
             className="font-bold text-user-primary ml-1"
           >
-            {!isSignIn ? "Sign In" : "Sign Up"}
+            {!isSignIn ? 'Sign In' : 'Sign Up'}
           </Link>
         </p>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default AuthForm
+export default AuthForm;
