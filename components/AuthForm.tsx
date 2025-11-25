@@ -64,7 +64,7 @@ export default function AuthForm({ type }: { type: FormType }) {
         console.log('[AuthForm] signup succeeded, redirecting…');
         const target =
           process.env.NEXT_PUBLIC_RESUME_APP_URL ||
-          'http://35.207.218.80/resume_app/';
+          'https://hack-street-intellecto.vercel.app/';
         if (typeof window !== 'undefined') {
           window.location.assign(target);
         }
